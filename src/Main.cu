@@ -1,10 +1,13 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <curand.h>
+#include <curand_kernel.h>
 
 #include <Math.cuh>
 #include <Solid.cuh>
 #include <World.cuh>
 #include <Camera.cuh>
+#include <Random.cuh>
 
 #include <SDL2/SDL.h>
 
@@ -15,7 +18,7 @@ const int height = 768;
 
 const float aspect = float(width) / float(height);
 
-__global__ void createWorld(Solid** list, Solid** world) {
+__global__ void createWorld(Solid **list, Solid **world) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         list[0] = new Sphere(Vec3(0.0f, 0.0f, -1.0f), 0.5f);
         list[1] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f);
@@ -23,32 +26,36 @@ __global__ void createWorld(Solid** list, Solid** world) {
     }
 }
 
-__global__ void renderKernel(Camera *camera, Solid** world, uint8_t *frameBuffer) {
+__global__ void renderKernel(Camera *camera, Solid **world, curandState *state, int numSamples, uint8_t *frameBuffer) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
 
     if ((i >= width) || (j >= height))
         return;
 
-    float x = float(i) * 2.0f / float(width) - 1.0f;
-    float y = float(j) * 2.0f / float(height) - 1.0f;
-    y *= -1.0f;
+    int index = i + j * width;
+    curandState localState = state[index];
     Vec3 color;
 
-    Ray ray = camera->getRay(x, y);
+    for (int s = 0; s < numSamples; s++) {
+        float x = float(i) + curand_uniform(&localState) - 0.5f;
+        float y = float(j) + curand_uniform(&localState) - 0.5f;
+        x = 2.0f * (x / float(width)) - 1.0f;
+        y = 2.0f * (y / float(height)) - 1.0f;
+        y *= -1.0f;
 
-    HitRecord record;
-    if ((*world)->hit(ray, 0.0f, 1000.0f, record)) {
-        color = (record.normal * 0.5f + 0.5f) * 255;
-        frameBuffer[(i + j * width) * 3 + 0] = color.x;
-        frameBuffer[(i + j * width) * 3 + 1] = color.y;
-        frameBuffer[(i + j * width) * 3 + 2] = color.z;
-        return;
+        Ray ray = camera->getRay(x, y);
+
+        HitRecord record;
+        if ((*world)->hit(ray, 0.0f, 1000.0f, record)) {
+            color = color + (record.normal * 0.5f + 0.5f);
+        } else {
+            Vec3 unitDirection = normalize(ray.direction);
+            float t = 0.5f * (unitDirection.y + 1.0f);
+            color = color + (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+        }
     }
-
-    Vec3 unitDirection = normalize(ray.direction);
-    float t = 0.5f * (unitDirection.y + 1.0f);
-    color = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+    color = color / float(numSamples);
 
     frameBuffer[(i + j * width) * 3 + 0] = color.x * 255;
     frameBuffer[(i + j * width) * 3 + 1] = color.y * 255;
@@ -58,13 +65,22 @@ __global__ void renderKernel(Camera *camera, Solid** world, uint8_t *frameBuffer
 int main() {
     uint8_t *frameBuffer;
     Camera *camera;
-    Solid** world;
-    Solid** list;
+    Solid **world;
+    Solid **list;
+    curandState *state;
+    int numSamples = 1;
 
-    cudaMallocManaged(&list, sizeof(Solid*) * 2);
-    cudaMallocManaged(&world, sizeof(Solid*));
+    cudaMallocManaged(&list, sizeof(Solid *) * 2);
+    cudaMallocManaged(&world, sizeof(Solid *));
 
     createWorld<<<1, 1>>>(list, world);
+
+    cudaMallocManaged(&state, width * height * sizeof(curandState));
+
+    dim3 blocks(width / 16 + 1, height / 16 + 1);
+    dim3 threads(16, 16);
+
+    initRandom<<<blocks, threads>>>(width, height, state);
 
     cudaMallocManaged(&frameBuffer, width * height * 3);
     cudaMallocManaged(&camera, sizeof(Camera));
@@ -75,8 +91,6 @@ int main() {
     camera->lookAt = Vec3(0.0f, 0.0f, -1.0f);
     camera->up = Vec3(0.0f, 1.0f, 0.0f);
 
-    dim3 blocks(width / 16 + 1, height / 16 + 1);
-    dim3 threads(16, 16);
 
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Window *window = SDL_CreateWindow("Ray Tracing", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
@@ -92,27 +106,33 @@ int main() {
                 running = false;
             if (event.type == SDL_KEYDOWN) {
                 render = true;
-                if (event.key.keysym.sym == SDLK_a){
+                if (event.key.keysym.sym == SDLK_a) {
                     camera->position.x -= 0.1f;
                     camera->lookAt.x -= 0.1f;
                 }
-                if (event.key.keysym.sym == SDLK_d){
+                if (event.key.keysym.sym == SDLK_d) {
                     camera->position.x += 0.1f;
                     camera->lookAt.x += 0.1f;
                 }
-                if (event.key.keysym.sym == SDLK_w){
+                if (event.key.keysym.sym == SDLK_w) {
                     camera->position.y += 0.1f;
                     camera->lookAt.y += 0.1f;
                 }
-                if (event.key.keysym.sym == SDLK_s){
+                if (event.key.keysym.sym == SDLK_s) {
                     camera->position.y -= 0.1f;
                     camera->lookAt.y -= 0.1f;
+                }
+                if (event.key.keysym.sym == SDLK_q) {
+                    numSamples--;
+                }
+                if (event.key.keysym.sym == SDLK_e) {
+                    numSamples++;
                 }
             }
         }
 
         if (render) {
-            renderKernel<<<blocks, threads>>>(camera, world, frameBuffer);
+            renderKernel<<<blocks, threads>>>(camera, world, state, numSamples, frameBuffer);
             cudaDeviceSynchronize();
             render = false;
         }
