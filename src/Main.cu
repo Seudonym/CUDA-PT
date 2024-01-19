@@ -5,6 +5,8 @@
 #include <Solid.cuh>
 #include <Camera.cuh>
 
+#include <SDL2/SDL.h>
+
 #include <stdio.h>
 
 const int width = 1024;
@@ -12,7 +14,7 @@ const int height = 768;
 
 const float aspect = float(width) / float(height);
 
-__global__ void renderKernel(Vec3 *frameBuffer) {
+__global__ void renderKernel(Camera *camera, uint8_t *frameBuffer) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -21,49 +23,79 @@ __global__ void renderKernel(Vec3 *frameBuffer) {
 
     float x = float(i) * 2.0f / float(width) - 1.0f;
     float y = float(j) * 2.0f / float(height) - 1.0f;
+    Vec3 color;
 
-    Camera camera;
-    camera.position = Vec3(0.0f, 0.0f,1.0f);
-    camera.aspectRatio = aspect;
-    camera.fov = 3.14f / 2.0f;
-    camera.lookAt = Vec3(0.0f, 0.0f, -1.0f);
-    camera.up = Vec3(0.0f, 1.0f, 0.0f);
-    Ray ray = camera.getRay(x, y);
-    
+    Ray ray = camera->getRay(x, y);
+
     Sphere sphere(Vec3(0.0f, 0.0f, -1.0f), 1.0f);
     HitRecord record;
     if (sphere.hit(ray, 0.0f, 1000.0f, record)) {
-        frameBuffer[i + j * width] = Vec3(1.0f, 0.0f, 0.0f);
+        color = (record.normal * 0.5f + 0.5f) * 255;
+        frameBuffer[(i + j * width) * 3 + 0] = color.x;
+        frameBuffer[(i + j * width) * 3 + 1] = color.y;
+        frameBuffer[(i + j * width) * 3 + 2] = color.z;
         return;
     }
 
     Vec3 unitDirection = normalize(ray.direction);
     float t = 0.5f * (unitDirection.y + 1.0f);
-    Vec3 color = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+    color = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
 
-    frameBuffer[i + j * width] = color;
+    frameBuffer[(i + j * width) * 3 + 0] = color.x * 255;
+    frameBuffer[(i + j * width) * 3 + 1] = color.y * 255;
+    frameBuffer[(i + j * width) * 3 + 2] = color.z * 255;
 }
 
 int main() {
-    Vec3 *frameBuffer;
-    cudaMallocManaged(&frameBuffer, width * height * sizeof(Vec3));
+    uint8_t *frameBuffer;
+    Camera *camera;
+    cudaMallocManaged(&frameBuffer, width * height * 3);
+    cudaMallocManaged(&camera, sizeof(Camera));
+
+    camera->position = Vec3(0.0f, 0.0f, 1.0f);
+    camera->aspectRatio = aspect;
+    camera->fov = 3.14f / 2.0f;
+    camera->lookAt = Vec3(0.0f, 0.0f, -1.0f);
+    camera->up = Vec3(0.0f, 1.0f, 0.0f);
 
     dim3 blocks(width / 16 + 1, height / 16 + 1);
     dim3 threads(16, 16);
 
-    renderKernel<<<blocks, threads>>>(frameBuffer);
-    cudaDeviceSynchronize();
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Window *window = SDL_CreateWindow("Ray Tracing", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, width, height);
+    SDL_Event event;
+    bool running = true;
+    bool render = true;
 
-    FILE *file = fopen("image.ppm", "w");
-    fprintf(file, "P3\n%d %d\n%d\n", width, height, 255);
-    for (int j = height - 1; j >= 0; --j) {
-        for (int i = 0; i < width; ++i) {
-            Vec3 color = frameBuffer[i + j * width];
-            int ir = int(255.99 * color.x);
-            int ig = int(255.99 * color.y);
-            int ib = int(255.99 * color.z);
-            fprintf(file, "%d %d %d\n", ir, ig, ib);
+    while (running) {
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT)
+                running = false;
+            if (event.type == SDL_KEYDOWN) {
+                render = true;
+                if (event.key.keysym.sym == SDLK_a){
+                    camera->position.x -= 0.1f;
+                    camera->lookAt.x -= 0.1f;
+                }
+                if (event.key.keysym.sym == SDLK_d){
+                    camera->position.x += 0.1f;
+                    camera->lookAt.x += 0.1f;
+                }
+            }
         }
+
+        if (render) {
+            renderKernel<<<blocks, threads>>>(camera, frameBuffer);
+            cudaDeviceSynchronize();
+            render = false;
+        }
+
+        SDL_UpdateTexture(texture, NULL, frameBuffer, width * 3);
+        SDL_RenderClear(renderer);
+        SDL_RenderCopy(renderer, texture, NULL, NULL);
+        SDL_RenderPresent(renderer);
     }
 
     cudaFree(frameBuffer);
