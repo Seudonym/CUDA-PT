@@ -10,6 +10,7 @@ __device__ struct HitRecord {
 };
 
 __device__ class Solid {
+public:
     __device__ virtual bool hit(const Ray &r, float t_min, float t_max, HitRecord &rec) const = 0;
 };
 
@@ -18,8 +19,8 @@ __device__ class Sphere : public Solid {
     float radius;
 
 public:
-    __device__ Sphere() : radius(1.0f) {}
-    __device__ Sphere(const Vec3 &center, float radius) : center(center), radius(radius) {}
+    __host__ __device__ Sphere() : radius(1.0f) {}
+    __host__ __device__ Sphere(const Vec3 &center, float radius) : center(center), radius(radius) {}
 
     __device__ bool hit(const Ray &r, float t_min, float t_max, HitRecord &rec) const override {
         Vec3 oc = r.origin - center;

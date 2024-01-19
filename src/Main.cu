@@ -3,6 +3,7 @@
 
 #include <Math.cuh>
 #include <Solid.cuh>
+#include <World.cuh>
 #include <Camera.cuh>
 
 #include <SDL2/SDL.h>
@@ -14,7 +15,15 @@ const int height = 768;
 
 const float aspect = float(width) / float(height);
 
-__global__ void renderKernel(Camera *camera, uint8_t *frameBuffer) {
+__global__ void createWorld(Solid** list, Solid** world) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        list[0] = new Sphere(Vec3(0.0f, 0.0f, -1.0f), 0.5f);
+        list[1] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f);
+        *world = new World(list, 2);
+    }
+}
+
+__global__ void renderKernel(Camera *camera, Solid** world, uint8_t *frameBuffer) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -23,13 +32,13 @@ __global__ void renderKernel(Camera *camera, uint8_t *frameBuffer) {
 
     float x = float(i) * 2.0f / float(width) - 1.0f;
     float y = float(j) * 2.0f / float(height) - 1.0f;
+    y *= -1.0f;
     Vec3 color;
 
     Ray ray = camera->getRay(x, y);
 
-    Sphere sphere(Vec3(0.0f, 0.0f, -1.0f), 1.0f);
     HitRecord record;
-    if (sphere.hit(ray, 0.0f, 1000.0f, record)) {
+    if ((*world)->hit(ray, 0.0f, 1000.0f, record)) {
         color = (record.normal * 0.5f + 0.5f) * 255;
         frameBuffer[(i + j * width) * 3 + 0] = color.x;
         frameBuffer[(i + j * width) * 3 + 1] = color.y;
@@ -49,6 +58,14 @@ __global__ void renderKernel(Camera *camera, uint8_t *frameBuffer) {
 int main() {
     uint8_t *frameBuffer;
     Camera *camera;
+    Solid** world;
+    Solid** list;
+
+    cudaMallocManaged(&list, sizeof(Solid*) * 2);
+    cudaMallocManaged(&world, sizeof(Solid*));
+
+    createWorld<<<1, 1>>>(list, world);
+
     cudaMallocManaged(&frameBuffer, width * height * 3);
     cudaMallocManaged(&camera, sizeof(Camera));
 
@@ -83,11 +100,19 @@ int main() {
                     camera->position.x += 0.1f;
                     camera->lookAt.x += 0.1f;
                 }
+                if (event.key.keysym.sym == SDLK_w){
+                    camera->position.y += 0.1f;
+                    camera->lookAt.y += 0.1f;
+                }
+                if (event.key.keysym.sym == SDLK_s){
+                    camera->position.y -= 0.1f;
+                    camera->lookAt.y -= 0.1f;
+                }
             }
         }
 
         if (render) {
-            renderKernel<<<blocks, threads>>>(camera, frameBuffer);
+            renderKernel<<<blocks, threads>>>(camera, world, frameBuffer);
             cudaDeviceSynchronize();
             render = false;
         }
