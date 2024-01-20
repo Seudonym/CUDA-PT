@@ -11,6 +11,8 @@
 #include <Material.cuh>
 
 #include <SDL2/SDL.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 #include <stdio.h>
 #include <float.h>
@@ -24,12 +26,12 @@ __global__ void createWorld(Solid **list, Solid **world) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         list[0] = new Sphere(Vec3(-0.6f, 0.0f, -1.0f), 0.5f, new Lambertian(Vec3(0.5f)));
         list[1] = new Sphere(Vec3(+0.6f, 0.0f, -1.0f), 0.5f, new Dielectric(1.5f));
-        list[2] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f, new Lambertian(Vec3(0.8f, 0.8f, 0.4f)));
+        list[2] = new Sphere(Vec3(+1.8f, 0.0f, -1.0f), 0.5f, new Metal(Vec3(0.0f, 1.0f, 1.0f), 0.4f));
         *world = new World(list, 3);
     }
 }
 
-__device__ Vec3 traceRay(Ray ray, Solid **world, curandState *state) {
+__device__ Vec3 traceRay(Ray ray, Solid **world, float *image, curandState *state) {
     Ray currentRay = ray;
     Vec3 currentAttenuation = Vec3(1.0f);
 
@@ -45,8 +47,15 @@ __device__ Vec3 traceRay(Ray ray, Solid **world, curandState *state) {
                 break;
         } else {
             Vec3 unitDirection = normalize(currentRay.direction);
-            // float t = 0.5f * (unitDirection.x + 1.0f); Vec3 sky = (t < 0.5f) ? Vec3(1.0f, 0.0f, 0.0f) : Vec3(0.0f, 0.0f, 1.0f);
-            float t = 0.5f * (unitDirection.y + 1.0f);  Vec3 sky = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+            float u = (0.5 + atan2(unitDirection.x, unitDirection.z) / (2.0 * M_PIf));
+            float v = (0.5 - asin(unitDirection.y) / M_PIf);
+
+            int x = (int)(u * (float)1024);
+            int y = (int)(v * (float)512);
+            int index = 3 * (y * 1024 + x);
+            if (index < 0 || index > 1024 * 512 * 3) return Vec3(1.0f);
+
+            Vec3 sky = Vec3(image[index + 0], image[index + 1], image[index + 2]);
 
             return currentAttenuation * sky;
         }
@@ -54,7 +63,7 @@ __device__ Vec3 traceRay(Ray ray, Solid **world, curandState *state) {
     return Vec3();
 }
 
-__global__ void renderKernel(Camera *camera, Solid **world, int numSamples, uint8_t *frameBuffer, curandState *state) {
+__global__ void renderKernel(Camera *camera, Solid **world, int numSamples, uint8_t *frameBuffer, float *image, curandState *state) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -74,7 +83,7 @@ __global__ void renderKernel(Camera *camera, Solid **world, int numSamples, uint
 
         Ray ray = camera->getRay(x, y);
 
-        color = color + traceRay(ray, world, &localState);
+        color = color + traceRay(ray, world, image, &localState);
     }
     color = color / float(numSamples);
 
@@ -85,23 +94,33 @@ __global__ void renderKernel(Camera *camera, Solid **world, int numSamples, uint
 
 int main() {
     uint8_t *frameBuffer;
+    float *image;
     Camera *camera;
     Solid **world;
     Solid **list;
     curandState *state;
     int numSamples = 1;
 
-    cudaMallocManaged(&list, sizeof(Solid *) * 2);
-    cudaMallocManaged(&world, sizeof(Solid *));
-
-    createWorld<<<1, 1>>>(list, world);
-
-    cudaMallocManaged(&state, width * height * sizeof(curandState));
-
     dim3 blocks(width / 16 + 1, height / 16 + 1);
     dim3 threads(16, 16);
 
+    cudaMallocManaged(&list, sizeof(Solid *) * 3);
+    cudaMallocManaged(&world, sizeof(Solid *));
+    createWorld<<<1, 1>>>(list, world);
+    cudaDeviceSynchronize();
+
+    cudaMallocManaged(&state, width * height * sizeof(curandState));
     initRandom<<<blocks, threads>>>(width, height, state);
+    cudaDeviceSynchronize();
+
+    int imgWidth, imgHeight, channels;
+    unsigned char *img = stbi_load("./hdri/hdri1.hdr", &imgWidth, &imgHeight, &channels, 0);
+    cudaMallocManaged(&image, imgWidth * imgHeight * channels * sizeof(float));
+    for (int i = 0; i < imgWidth * imgHeight * channels; i++) {
+        float value = static_cast<float>(img[i]);
+        image[i] = value / 255.0f;
+    }
+    stbi_image_free(img);
 
     cudaMallocManaged(&frameBuffer, width * height * 3);
     cudaMallocManaged(&camera, sizeof(Camera));
@@ -119,6 +138,7 @@ int main() {
     SDL_Event event;
     bool running = true;
     bool render = true;
+
 
     while (running) {
         while (SDL_PollEvent(&event)) {
@@ -202,7 +222,7 @@ int main() {
         }
 
         if (render) {
-            renderKernel<<<blocks, threads>>>(camera, world, numSamples, frameBuffer, state);
+            renderKernel<<<blocks, threads>>>(camera, world, numSamples, frameBuffer, image, state);
             cudaDeviceSynchronize();
             render = false;
         }
