@@ -3,10 +3,12 @@
 #include <cuda_runtime.h>
 #include <Math.cuh>
 
+class Material;
 __device__ struct HitRecord {
     float t;
     Vec3 p;
     Vec3 normal;
+    Material *material; 
 };
 
 __device__ class Solid {
@@ -17,10 +19,11 @@ public:
 __device__ class Sphere : public Solid {
     Vec3 center;
     float radius;
+    Material *material;
 
 public:
     __host__ __device__ Sphere() : radius(1.0f) {}
-    __host__ __device__ Sphere(const Vec3 &center, float radius) : center(center), radius(radius) {}
+    __host__ __device__ Sphere(const Vec3 &center, float radius, Material* material) : center(center), radius(radius), material(material) {}
 
     __device__ bool hit(const Ray &r, float t_min, float t_max, HitRecord &rec) const override {
         Vec3 oc = r.origin - center;
@@ -34,6 +37,7 @@ public:
                 rec.t = temp;
                 rec.p = r.pointAt(rec.t);
                 rec.normal = (rec.p - center) / radius;
+                rec.material = material;
                 return true;
             }
             temp = (-b + sqrt(discriminant)) / a;
@@ -41,6 +45,7 @@ public:
                 rec.t = temp;
                 rec.p = r.pointAt(rec.t);
                 rec.normal = (rec.p - center) / radius;
+                rec.material = material;
                 return true;
             }
         }

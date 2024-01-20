@@ -4,10 +4,11 @@
 #include <curand_kernel.h>
 
 #include <Math.cuh>
+#include <Random.cuh>
+#include <Camera.cuh>
 #include <Solid.cuh>
 #include <World.cuh>
-#include <Camera.cuh>
-#include <Random.cuh>
+#include <Material.cuh>
 
 #include <SDL2/SDL.h>
 
@@ -21,32 +22,26 @@ const float aspect = float(width) / float(height);
 
 __global__ void createWorld(Solid **list, Solid **world) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        list[0] = new Sphere(Vec3(0.0f, 0.0f, -1.0f), 0.5f);
-        list[1] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f);
+        list[0] = new Sphere(Vec3(0.0f, 0.0f, -1.0f), 0.5f, new Lambertian(Vec3(0.1f, 0.2f, 0.5f)));
+        list[1] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f, new Lambertian(Vec3(0.8f, 0.8f, 0.0f)));
         *world = new World(list, 2);
     }
 }
 
 __device__ Vec3 traceRay(Ray ray, Solid **world, curandState *state) {
-    // HitRecord record;
-    // if ((*world)->hit(ray, 0.0f, 1000.0f, record)) {
-    //     Vec3 target = record.p + record.normal + randomUnitVector(state);
-    //     return 0.5f * record.normal + Vec3(0.5f);
-    // } else {
-    //     Vec3 unitDirection = normalize(ray.direction);
-    //     float t = 0.5f * (unitDirection.y + 1.0f);
-    //     return (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-    // }
-
     Ray currentRay = ray;
-    float currentAttenuation = 1.0f;
+    Vec3 currentAttenuation = Vec3(1.0f);
 
     for (int i = 0; i < 50; i++) {
         HitRecord record;
         if ((*world)->hit(currentRay, 0.001f, FLT_MAX, record)) {
-            Vec3 target = record.p + record.normal + randomUnitVector(state);
-            currentAttenuation *= 0.5f;
-            currentRay = Ray(record.p, target - record.p);
+            Ray scattered;
+            Vec3 attenuation;
+            if (record.material->scatter(currentRay, record, attenuation, scattered, state)) {
+                currentRay = scattered;
+                currentAttenuation = currentAttenuation * attenuation;
+            } else
+                break;
         } else {
             Vec3 unitDirection = normalize(currentRay.direction);
             float t = 0.5f * (unitDirection.y + 1.0f);
