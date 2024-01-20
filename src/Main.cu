@@ -12,6 +12,7 @@
 #include <SDL2/SDL.h>
 
 #include <stdio.h>
+#include <float.h>
 
 const int width = 1024;
 const int height = 768;
@@ -26,7 +27,37 @@ __global__ void createWorld(Solid **list, Solid **world) {
     }
 }
 
-__global__ void renderKernel(Camera *camera, Solid **world, curandState *state, int numSamples, uint8_t *frameBuffer) {
+__device__ Vec3 traceRay(Ray ray, Solid **world, curandState *state) {
+    // HitRecord record;
+    // if ((*world)->hit(ray, 0.0f, 1000.0f, record)) {
+    //     Vec3 target = record.p + record.normal + randomUnitVector(state);
+    //     return 0.5f * record.normal + Vec3(0.5f);
+    // } else {
+    //     Vec3 unitDirection = normalize(ray.direction);
+    //     float t = 0.5f * (unitDirection.y + 1.0f);
+    //     return (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+    // }
+
+    Ray currentRay = ray;
+    float currentAttenuation = 1.0f;
+
+    for (int i = 0; i < 50; i++) {
+        HitRecord record;
+        if ((*world)->hit(currentRay, 0.001f, FLT_MAX, record)) {
+            Vec3 target = record.p + record.normal + randomUnitVector(state);
+            currentAttenuation *= 0.5f;
+            currentRay = Ray(record.p, target - record.p);
+        } else {
+            Vec3 unitDirection = normalize(currentRay.direction);
+            float t = 0.5f * (unitDirection.y + 1.0f);
+            Vec3 sky = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+            return currentAttenuation * sky;
+        }
+    }
+    return Vec3();
+}
+
+__global__ void renderKernel(Camera *camera, Solid **world, int numSamples, uint8_t *frameBuffer, curandState *state) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -46,14 +77,7 @@ __global__ void renderKernel(Camera *camera, Solid **world, curandState *state, 
 
         Ray ray = camera->getRay(x, y);
 
-        HitRecord record;
-        if ((*world)->hit(ray, 0.0f, 1000.0f, record)) {
-            color = color + (record.normal * 0.5f + 0.5f);
-        } else {
-            Vec3 unitDirection = normalize(ray.direction);
-            float t = 0.5f * (unitDirection.y + 1.0f);
-            color = color + (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-        }
+        color = color + traceRay(ray, world, &localState);
     }
     color = color / float(numSamples);
 
@@ -91,7 +115,6 @@ int main() {
     camera->lookAt = Vec3(0.0f, 0.0f, -1.0f);
     camera->up = Vec3(0.0f, 1.0f, 0.0f);
 
-
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Window *window = SDL_CreateWindow("Ray Tracing", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -115,12 +138,12 @@ int main() {
                     camera->lookAt.x += 0.1f;
                 }
                 if (event.key.keysym.sym == SDLK_w) {
-                    camera->position.y += 0.1f;
-                    camera->lookAt.y += 0.1f;
+                    camera->position.z -= 0.1f;
+                    camera->lookAt.z -= 0.1f;
                 }
                 if (event.key.keysym.sym == SDLK_s) {
-                    camera->position.y -= 0.1f;
-                    camera->lookAt.y -= 0.1f;
+                    camera->position.z += 0.1f;
+                    camera->lookAt.z += 0.1f;
                 }
                 if (event.key.keysym.sym == SDLK_q) {
                     numSamples--;
@@ -132,7 +155,7 @@ int main() {
         }
 
         if (render) {
-            renderKernel<<<blocks, threads>>>(camera, world, state, numSamples, frameBuffer);
+            renderKernel<<<blocks, threads>>>(camera, world, numSamples, frameBuffer, state);
             cudaDeviceSynchronize();
             render = false;
         }

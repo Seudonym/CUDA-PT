@@ -12,3 +12,10 @@ __global__ void initRandom(int width, int height, curandState* state) {
     int idx = y * width + x;
     curand_init(1234, idx, 0, &state[idx]);
 }
+
+__device__ Vec3 randomUnitVector(curandState* state) {
+    float a = curand_uniform(state) * 2 * M_PI;
+    float z = curand_uniform(state) * 2 - 1;
+    float r = sqrt(1 - z * z);
+    return Vec3(r * cos(a), r * sin(a), z);
+}
