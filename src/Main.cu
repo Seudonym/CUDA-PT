@@ -23,7 +23,7 @@ const float aspect = float(width) / float(height);
 __global__ void createWorld(Solid **list, Solid **world) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         list[0] = new Sphere(Vec3(-0.6f, 0.0f, -1.0f), 0.5f, new Lambertian(Vec3(0.5f)));
-        list[1] = new Sphere(Vec3(+0.6f, 0.0f, -1.0f), 0.5f, new Metal(Vec3(1.0f), 0.0f));
+        list[1] = new Sphere(Vec3(+0.6f, 0.0f, -1.0f), 0.5f, new Dielectric(1.5f));
         list[2] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f, new Lambertian(Vec3(0.8f, 0.8f, 0.4f)));
         *world = new World(list, 3);
     }
@@ -45,8 +45,9 @@ __device__ Vec3 traceRay(Ray ray, Solid **world, curandState *state) {
                 break;
         } else {
             Vec3 unitDirection = normalize(currentRay.direction);
-            float t = 0.5f * (unitDirection.y + 1.0f);
-            Vec3 sky = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+            // float t = 0.5f * (unitDirection.x + 1.0f); Vec3 sky = (t < 0.5f) ? Vec3(1.0f, 0.0f, 0.0f) : Vec3(0.0f, 0.0f, 1.0f);
+            float t = 0.5f * (unitDirection.y + 1.0f);  Vec3 sky = (1.0f - t) * Vec3(1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+
             return currentAttenuation * sky;
         }
     }
@@ -112,7 +113,7 @@ int main() {
     camera->up = Vec3(0.0f, 1.0f, 0.0f);
 
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window *window = SDL_CreateWindow("Ray Tracing", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
+    SDL_Window *window = SDL_CreateWindow("Path Tracing", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, width, height);
     SDL_Event event;

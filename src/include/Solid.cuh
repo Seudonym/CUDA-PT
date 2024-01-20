@@ -9,6 +9,12 @@ __device__ struct HitRecord {
     Vec3 p;
     Vec3 normal;
     Material *material; 
+    bool frontFace;
+
+    __device__ void setFaceNormal(const Ray &r, const Vec3 &outwardNormal) {
+        frontFace = dot(r.direction, outwardNormal) < 0;
+        normal = frontFace ? outwardNormal : -1.0f * outwardNormal;
+    }
 };
 
 __device__ class Solid {
@@ -36,7 +42,7 @@ public:
             if (temp < t_max && temp > t_min) {
                 rec.t = temp;
                 rec.p = r.pointAt(rec.t);
-                rec.normal = (rec.p - center) / radius;
+                rec.setFaceNormal(r, (rec.p - center) / radius);
                 rec.material = material;
                 return true;
             }
@@ -44,7 +50,7 @@ public:
             if (temp < t_max && temp > t_min) {
                 rec.t = temp;
                 rec.p = r.pointAt(rec.t);
-                rec.normal = (rec.p - center) / radius;
+                rec.setFaceNormal(r, (rec.p - center) / radius);
                 rec.material = material;
                 return true;
             }

@@ -47,12 +47,29 @@ __host__ __device__ Vec3 cross(const Vec3 &v1, const Vec3 &v2) {
                 v1.x * v2.y - v1.y * v2.x);
 }
 
+__host__ __device__ float length(const Vec3 &v) {
+    return sqrtf(dot(v, v));
+}
+
 __host__ __device__ Vec3 normalize(const Vec3 &v) {
     return v / sqrtf(dot(v, v));
 }
 
 __host__ __device__ Vec3 reflect(const Vec3& v, const Vec3& n) {
     return v - 2 * dot(v, n) * n;
+}
+
+__host__ __device__ Vec3 refract(const Vec3& v, const Vec3& n, float ni_over_nt) {
+    float cosTheta = fminf(dot(-1.0f * v, n), 1.0f);
+    Vec3 rOutPerp = ni_over_nt * (v + cosTheta * n);
+    Vec3 rOutParallel = -sqrtf(fabsf(1.0f - dot(rOutPerp, rOutPerp))) * n;
+    return rOutParallel + rOutPerp;
+}
+
+__host__ __device__ float schlick(float cosine, float ref_idx) {
+    float r0 = (1 - ref_idx) / (1 + ref_idx);
+    r0 *= r0;
+    return r0 + (1 - r0) * powf((1 - cosine), 5);
 }
 
 __host__ __device__ struct Ray {
