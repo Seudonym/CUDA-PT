@@ -51,6 +51,10 @@ __host__ __device__ Vec3 normalize(const Vec3 &v) {
     return v / sqrtf(dot(v, v));
 }
 
+__host__ __device__ Vec3 reflect(const Vec3& v, const Vec3& n) {
+    return v - 2 * dot(v, n) * n;
+}
+
 __host__ __device__ struct Ray {
     Vec3 origin;
     Vec3 direction;

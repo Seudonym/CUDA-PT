@@ -22,9 +22,10 @@ const float aspect = float(width) / float(height);
 
 __global__ void createWorld(Solid **list, Solid **world) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        list[0] = new Sphere(Vec3(0.0f, 0.0f, -1.0f), 0.5f, new Lambertian(Vec3(0.1f, 0.2f, 0.5f)));
-        list[1] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f, new Lambertian(Vec3(0.8f, 0.8f, 0.0f)));
-        *world = new World(list, 2);
+        list[0] = new Sphere(Vec3(-0.6f, 0.0f, -1.0f), 0.5f, new Lambertian(Vec3(0.5f)));
+        list[1] = new Sphere(Vec3(+0.6f, 0.0f, -1.0f), 0.5f, new Metal(Vec3(1.0f), 0.0f));
+        list[2] = new Sphere(Vec3(0.0f, -100.5f, -1.0f), 100.0f, new Lambertian(Vec3(0.8f, 0.8f, 0.4f)));
+        *world = new World(list, 3);
     }
 }
 
@@ -124,22 +125,72 @@ int main() {
                 running = false;
             if (event.type == SDL_KEYDOWN) {
                 render = true;
-                if (event.key.keysym.sym == SDLK_a) {
-                    camera->position.x -= 0.1f;
-                    camera->lookAt.x -= 0.1f;
-                }
-                if (event.key.keysym.sym == SDLK_d) {
-                    camera->position.x += 0.1f;
-                    camera->lookAt.x += 0.1f;
-                }
+                // MOVE CAMERA
                 if (event.key.keysym.sym == SDLK_w) {
-                    camera->position.z -= 0.1f;
-                    camera->lookAt.z -= 0.1f;
+                    Vec3 direction = camera->lookAt - camera->position;
+                    direction = normalize(direction);
+                    camera->position = camera->position + direction * 0.1f;
+                    camera->lookAt = camera->lookAt + direction * 0.1f;
                 }
                 if (event.key.keysym.sym == SDLK_s) {
-                    camera->position.z += 0.1f;
-                    camera->lookAt.z += 0.1f;
+                    Vec3 direction = camera->lookAt - camera->position;
+                    direction = normalize(direction);
+                    camera->position = camera->position - direction * 0.1f;
+                    camera->lookAt = camera->lookAt - direction * 0.1f;
                 }
+                if (event.key.keysym.sym == SDLK_d) {
+                    Vec3 direction = camera->lookAt - camera->position;
+                    Vec3 right = cross(camera->up, direction);
+                    right = normalize(right);
+                    camera->position = camera->position - right * 0.1f;
+                    camera->lookAt = camera->lookAt - right * 0.1f;
+                }
+                if (event.key.keysym.sym == SDLK_a) {
+                    Vec3 direction = camera->lookAt - camera->position;
+                    Vec3 right = cross(camera->up, direction);
+                    right = normalize(right);
+                    camera->position = camera->position + right * 0.1f;
+                    camera->lookAt = camera->lookAt + right * 0.1f;
+                }
+
+                // ROTATE CAMERA
+                if (event.key.keysym.sym == SDLK_LEFT) {
+                    Vec3 direction = camera->lookAt - camera->position;
+                    float theta = -0.1f;
+                    float x = direction.x;
+                    float z = direction.z;
+                    direction.x = x * cos(theta) - z * sin(theta);
+                    direction.z = x * sin(theta) + z * cos(theta);
+                    camera->lookAt = camera->position + direction;
+                }
+                if (event.key.keysym.sym == SDLK_RIGHT) {
+                    Vec3 direction = camera->lookAt - camera->position;
+                    float theta = 0.1f;
+                    float x = direction.x;
+                    float z = direction.z;
+                    direction.x = x * cos(theta) - z * sin(theta);
+                    direction.z = x * sin(theta) + z * cos(theta);
+                    camera->lookAt = camera->position + direction;
+                }
+                if (event.key.keysym.sym == SDLK_UP) {
+                    Vec3 direction = camera->lookAt - camera->position;
+                    float theta = 0.1f;
+                    float y = direction.y;
+                    float z = direction.z;
+                    direction.y = y * cos(theta) - z * sin(theta);
+                    direction.z = y * sin(theta) + z * cos(theta);
+                    camera->lookAt = camera->position + direction;
+                }
+                if (event.key.keysym.sym == SDLK_DOWN) {
+                    Vec3 direction = camera->lookAt - camera->position;
+                    float theta = -0.1f;
+                    float y = direction.y;
+                    float z = direction.z;
+                    direction.y = y * cos(theta) - z * sin(theta);
+                    direction.z = y * sin(theta) + z * cos(theta);
+                    camera->lookAt = camera->position + direction;
+                }
+
                 if (event.key.keysym.sym == SDLK_q) {
                     numSamples--;
                 }
